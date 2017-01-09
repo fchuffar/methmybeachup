@@ -1,0 +1,18 @@
+Package: methmybeachup
+Type: Package
+Title: Easily convolves methylome signal
+Description: The methmybeachup package provides a set of functions allowing to easily convolves and vizualise methylome signal across genes and CpG islands.
+Version: 0.0.0.9000
+Date: 2017-01-05
+Authors@R: c(
+    person("Florent", "Chuffart", , "florent.chuffart@gmail.com", c("aut", "cre", "cph"))
+    )
+Maintainer: Florent Chuffart <florent.chuffart@gmail.com>
+License: CeCILL
+LazyData: TRUE
+RoxygenNote: 5.0.1
+Depends: R(>= 2.10.0)
+Suggests: knitr,
+    rmarkdown,
+    epimeddata,
+    testthat
