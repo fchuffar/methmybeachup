@@ -4,15 +4,16 @@
 \alias{analyse_meth}
 \title{A Function Analyses Methylome data}
 \usage{
-analyse_meth(gene, sunexp_data, sunexp_platform, cols, PLOT = TRUE,
-  up_str = 5000, dwn_str = 5000, win_size = 1500, wig_size = 50)
+analyse_meth(gene, meth_data, meth_platform, cols, PLOT = TRUE,
+  up_str = 5000, dwn_str = 5000, win_size = 1500, wig_size = 50,
+  JUST_PROBE_POS = FALSE)
 }
 \arguments{
 \item{gene}{A vector describing the gene (line of a bed file).}
 
-\item{sunexp_data}{A matrix of beta values.}
+\item{meth_data}{A matrix of beta values.}
 
-\item{sunexp_platform}{A data frame describing CpG positions.}
+\item{meth_platform}{A data frame describing CpG positions.}
 
 \item{cols}{A color vectors indexed by by samples names.}
 
@@ -25,6 +26,8 @@ analyse_meth(gene, sunexp_data, sunexp_platform, cols, PLOT = TRUE,
 \item{win_size}{An integer specifying slidding window size (in bp).}
 
 \item{wig_size}{An integer specifying wiggle size (in bp).}
+
+\item{JUST_PROBE_POS}{A boolean defining if function returns only probes positions.}
 }
 \value{
 A matrix of convolved probes signal around the TSS of the selected gene.
@@ -37,6 +40,7 @@ cols = as.numeric(sunexp_design$sex) * 2
 names(cols) = rownames(sunexp_design)
 gene = genes[1,]
 res1 = analyse_meth(gene, sunexp_data, sunexp_platform, cols, PLOT=TRUE)
-legend("topright", col=as.numeric(unique(sunexp_design$sex)) * 2, legend=unique(sunexp_design$sex), lty=1)
+legend("topright", col=as.numeric(unique(sunexp_design$sex)) * 2, 
+       legend=unique(sunexp_design$sex), lty=1)
 }
 
