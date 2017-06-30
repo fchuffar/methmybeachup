@@ -5,7 +5,7 @@
 \title{A Function Analyses CNV data}
 \usage{
 analyse_cnv(gene, cnv_data, cnv_platform, cols, PLOT = FALSE, up_str = 5000,
-  dwn_str = 5000)
+  dwn_str = 5000, method = NULL, FULL = FALSE)
 }
 \arguments{
 \item{gene}{A vector describing the gene (line of a bed file).}
@@ -21,6 +21,8 @@ analyse_cnv(gene, cnv_data, cnv_platform, cols, PLOT = FALSE, up_str = 5000,
 \item{up_str}{An integer specifying up stream size (in bp).}
 
 \item{dwn_str}{An integer specifying down stream size (in bp).}
+
+\item{method}{A function used to extract CN score on each region}
 }
 \description{
 This function analyses methylome data.

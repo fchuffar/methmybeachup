@@ -8,10 +8,11 @@
 #' @param PLOT A boolean defining if graphical output must be dispayed on the graphical output.
 #' @param up_str   An integer specifying up stream size (in bp).
 #' @param dwn_str  An integer specifying down stream size (in bp).
+#' @param method  A function used to extract CN score on each region
 #' @importFrom graphics legend
 #' @importFrom graphics axis
 #' @export
-analyse_cnv = function(gene, cnv_data, cnv_platform, cols, PLOT=FALSE, up_str=5000, dwn_str=5000) {
+analyse_cnv = function(gene, cnv_data, cnv_platform, cols, PLOT=FALSE, up_str=5000, dwn_str=5000, method=NULL, FULL=FALSE) {
   # params
   sample_names = colnames(cnv_data)
   if (missing(cols)) {
@@ -40,18 +41,43 @@ analyse_cnv = function(gene, cnv_data, cnv_platform, cols, PLOT=FALSE, up_str=50
   if (is.na(probe_after)) {
     probe_after =    rev(rownames(cnv_platform)[!is.na(cnv_platform$chrom)  & cnv_platform$chrom == chr]) [1]
   }
+  if (is.na(probe_before)) {
+    probe_before =    rownames(cnv_platform)[!is.na(cnv_platform$chrom)  & cnv_platform$chrom == chr][1]
+  }
   idx = which(rownames(cnv_platform) == probe_before):which(rownames(cnv_platform) == probe_after)
+  if (length(idx) < 2) {
+    ret = rep(NA, length(sample_names))
+    names(ret) = sample_names
+    return(ret)
+  }
   probes_cnv = rownames(cnv_platform)[idx]
   pos_cnv = cnv_platform[probes_cnv, ]$loc
   probes_cnv_close = rownames(cnv_platform)[idx]
 
-  cnv_val = apply(cnv_data[probes_cnv_close, sample_names],2, function(c) {
-    if (length(unique(c)) == 1) {
-      return(unique(c)[1])
+  if (FULL) {
+    cnv_val = apply(cnv_data[probes_cnv_close, sample_names],2, function(c) {
+      mean = mean(c, na.rm=TRUE)
+      sd = sd(c, na.rm=TRUE)
+      len = length(c)
+      nb_na = sum(is.na(c))      
+      return(list(mean, sd, len, nb_na))
+    })    
+    cnv_val = do.call(rbind, cnv_val)
+  } else {
+    if (!is.null(method)) {
+      cnv_val = apply(cnv_data[probes_cnv_close, sample_names],2, function(c) {
+        return(method(c))
+      })    
     } else {
-      return(NA)
-    }
-  })
+      cnv_val = apply(cnv_data[probes_cnv_close, sample_names],2, function(c) {
+        if (length(unique(c)) == 1) {
+          return(unique(c)[1])
+        } else {
+          return(NA)
+        }
+      })    
+    }    
+  }
 
   if (PLOT) { 
     max_cnv = 8
@@ -160,10 +186,13 @@ analyse_trscr_cnv = function(gene, trscr_res, cnv_res, meth_idx, ctrl_idx, cols,
 #' @param cols A color vectors indexed by by samples names.
 #' @param PLOT A boolean defining if graphical output must be dispayed on the graphical output.
 #' @param JUST_PROBE_POS A boolean defining if function returns only probes positions.
+#' @param GAUSSIAN_MIXTURE A boolean specifying if gaussian mixture model is use to convolve signal.
 #' @param up_str   An integer specifying up stream size (in bp).
 #' @param dwn_str  An integer specifying down stream size (in bp).
 #' @param win_size An integer specifying slidding window size (in bp).
 #' @param wig_size An integer specifying wiggle size (in bp).
+#' @param probe_idx A vector specifying probes associated to the gene.
+#' @param mat_mult A function to multiply matrices.
 #' @return A matrix of convolved probes signal around the TSS of the selected gene.
 #' @importFrom grDevices adjustcolor
 #' @importFrom graphics arrows
@@ -179,7 +208,10 @@ analyse_trscr_cnv = function(gene, trscr_res, cnv_res, meth_idx, ctrl_idx, cols,
 #' legend("topright", col=as.numeric(unique(sunexp_design$sex)) * 2, 
 #'        legend=unique(sunexp_design$sex), lty=1)
 #' @export
-analyse_meth = function(gene, meth_data, meth_platform, cols, PLOT=TRUE, up_str=5000, dwn_str=5000, win_size=1500, wig_size=50, JUST_PROBE_POS=FALSE) {
+analyse_meth = function(gene, meth_data, meth_platform, probe_idx, cols, PLOT=TRUE, up_str=5000, dwn_str=5000, win_size=1500, wig_size=50, JUST_PROBE_POS=FALSE, GAUSSIAN_MIXTURE=TRUE, mat_mult) {
+  if (missing(mat_mult)) {
+    mat_mult = function(A,B) {A %*% B}
+  }
   # print(gene)
   sample_names = colnames(meth_data)
   if (missing(cols)) {
@@ -194,6 +226,11 @@ analyse_meth = function(gene, meth_data, meth_platform, cols, PLOT=TRUE, up_str=
   gene_name =      gene[[4]]
   beg = as.numeric(gene[[2]])
   end = as.numeric(gene[[3]])
+  
+  # avoid chrXXX notation
+  if (substr(chr, 1, 3) == "chr") {
+    chr = substr(chr, 4, 100)
+  }
 
   # get meth infos
   if (strand == "-") {
@@ -201,52 +238,55 @@ analyse_meth = function(gene, meth_data, meth_platform, cols, PLOT=TRUE, up_str=
     off_set_beg = dwn_str
     off_set_end = up_str
     tss = end
-    reg_probes_names = rownames(meth_platform)[
-      !is.na(meth_platform$MAPINFO) & !is.na(meth_platform$CHR) &
-      meth_platform$CHR == chr &
-      meth_platform$MAPINFO > end-dwn_str &
-      meth_platform$MAPINFO <= end+up_str
-    ]
   } else {
     off_set_beg = up_str
     off_set_end = dwn_str
     tss = beg
-    reg_probes_names = rownames(meth_platform)[
+  }
+
+  ## Compute probes associated with the gene 
+  if (missing(probe_idx)) {
+    probe_idx = rownames(meth_platform)[
       !is.na(meth_platform$MAPINFO) & !is.na(meth_platform$CHR) &
       meth_platform$CHR == chr &
-      meth_platform$MAPINFO >= beg-up_str &
-      meth_platform$MAPINFO < beg+dwn_str
-    ]
+      meth_platform$MAPINFO >= tss-up_str &
+      meth_platform$MAPINFO < tss+dwn_str
+    ]    
   }
+
   if (JUST_PROBE_POS) {
-    return(reg_probes_names)
+    return(probe_idx)
   }
-  reg_probes_pos = meth_platform[reg_probes_names, "MAPINFO"]
+  gene_probe_pos = meth_platform[probe_idx, "MAPINFO"]
   tss_shift = tss %% wig_size
 
-  if (length(reg_probes_pos) == 0) {
+  if (length(gene_probe_pos) == 0) {
+    warning(paste0("No probe for ", gene[[4]], "."))
     return(NULL)
   }
 
   # get independant regions form pos
-  foo = reg_probes_pos[-1] - reg_probes_pos[-length(reg_probes_names)]
+  foo = gene_probe_pos[-1] - gene_probe_pos[-length(probe_idx)]
   ends_idx = which(foo > win_size)
   starts_idx = ends_idx + 1
   starts_idx = c(1, starts_idx)
-  ends_idx = c(ends_idx, length(reg_probes_names))
+  ends_idx = c(ends_idx, length(probe_idx))
   reg_infos = data.frame(starts_idx, ends_idx)
-  reg_infos = data.frame(starts_idx, ends_idx, beg=reg_probes_pos[starts_idx], end=reg_probes_pos[ends_idx])
+  reg_infos = data.frame(starts_idx, ends_idx, beg=gene_probe_pos[starts_idx], end=gene_probe_pos[ends_idx])
   reg_infos$len =  reg_infos$end - reg_infos$beg
   reg_infos$nb_probes =  reg_infos$ends_idx - reg_infos$starts_idx + 1
 
-  # let's do it
-  wig_data_sparse = lapply(1:nrow(reg_infos), function(i) {
+
+
+
+  # let's do it 1
+  preproc_matrices = lapply(1:nrow(reg_infos), function(i) {
     tmp_reg = reg_infos[i,]
     tmp_starts_idx = tmp_reg$starts_idx
     tmp_ends_idx = tmp_reg$ends_idx
     tmp_probe_idx = tmp_starts_idx:tmp_ends_idx
-    tmp_probe_pos = reg_probes_pos[tmp_probe_idx]
-    tmp_d = meth_data[reg_probes_names[tmp_probe_idx],]
+    tmp_probe_pos = gene_probe_pos[tmp_probe_idx]
+    tmp_d = meth_data[probe_idx[tmp_probe_idx],]
     if (length(tmp_probe_idx) > 1) {
       tmp_d = t(tmp_d)
     } else {
@@ -254,35 +294,92 @@ analyse_meth = function(gene, meth_data, meth_platform, cols, PLOT=TRUE, up_str=
     }
     # bases for convotutions
     if (strand == "-") {
-      tmp_pos =  (reg_probes_pos[tmp_starts_idx]-win_size/2+1):(reg_probes_pos[tmp_ends_idx]+win_size/2)
+      tmp_pos =  (gene_probe_pos[tmp_starts_idx]-win_size/2+1):(gene_probe_pos[tmp_ends_idx]+win_size/2)
       wig_starts = (floor(min((tmp_pos - tss_shift) / wig_size)):floor(max((tmp_pos - tss_shift) / wig_size))) * wig_size + tss_shift + 1
     } else {
-      tmp_pos =  (reg_probes_pos[tmp_starts_idx]-win_size/2):(reg_probes_pos[tmp_ends_idx]+win_size/2-1)
+      tmp_pos =  (gene_probe_pos[tmp_starts_idx]-win_size/2):(gene_probe_pos[tmp_ends_idx]+win_size/2-1)
       wig_starts = (floor(min((tmp_pos - tss_shift) / wig_size)):floor(max((tmp_pos - tss_shift) / wig_size))) * wig_size + tss_shift
     }
     # convolution matrix for sliding window stuffs
-    win_mat = sapply(tmp_pos, function(p){
-      if (strand == "-") {
-        vec = p - tmp_probe_pos > -750 & p - tmp_probe_pos <= 750
-      } else {
-        vec = p - tmp_probe_pos >= -750 & p - tmp_probe_pos < 750
-      }
-      ret = (vec / sum(vec))
-      return(ret)
-    })
+    if (GAUSSIAN_MIXTURE) {
+      win_mat = t(sapply(tmp_probe_pos, function(p){
+        dnorm(tmp_pos, p, win_size/8)
+      }))
+    } else {
+      win_mat = sapply(tmp_pos, function(p){
+        if (strand == "-") {
+          vec = p - tmp_probe_pos > -win_size/2 & p - tmp_probe_pos <= win_size/2
+        } else {
+          vec = p - tmp_probe_pos >= -win_size/2 & p - tmp_probe_pos < win_size/2
+        }
+        ret = vec
+        return(ret)
+      })
+    }
+    # density of probes
+    if (length(tmp_probe_idx) == 1) {
+      reg_probe_density = win_mat
+    } else {
+      reg_probe_density = apply(win_mat, 2, sum)
+    }      
+    # normalize win_mat
+    if (length(tmp_probe_idx) == 1) {
+      win_mat = t(rep(1, length(tmp_pos)))
+    } else {
+      win_mat = apply(win_mat, 2, function(c) {c / sum(c)})      
+    }      
     # convolution matrix for wiggled stuffs
     wig_mat = sapply(wig_starts, function(w){
       vec = tmp_pos - w >= 0 & tmp_pos - w < wig_size
-      ret = (vec / sum(vec))
+      if (sum(vec) != 0) {
+        ret = (vec / sum(vec))
+      } else {
+        ret = vec
+      }
       return(ret)
     })
+    ret = list(tmp_starts_idx=tmp_starts_idx, tmp_ends_idx=tmp_ends_idx, tmp_pos=tmp_pos, wig_starts=wig_starts, tmp_d=tmp_d, reg_probe_density=reg_probe_density, win_mat=win_mat, wig_mat=wig_mat)
+    return(ret)
+  })
+
+  # let's do it 2
+  wig_data_sparse = lapply(preproc_matrices, function(l) {
+    wig_starts = l$wig_starts
+    tmp_d      = l$tmp_d
+    win_mat    = l$win_mat
+    wig_mat    = l$wig_mat
     # convolved data
-    mat_prod = tmp_d %*% win_mat %*% wig_mat
+    mat_prod = mat_mult(mat_mult(tmp_d, win_mat), wig_mat)
     ret = cbind(wig_starts, t(mat_prod))
     return(ret)
   })
   wig_data_sparse = do.call(rbind, wig_data_sparse)
   rownames(wig_data_sparse) = paste("pos_", wig_data_sparse[,1], sep="")
+
+  # let's do it 2
+  wig_probe_density_split = unlist(lapply(preproc_matrices, function(l) {
+    reg_probe_density = l$reg_probe_density
+    wig_mat    = l$wig_mat
+    # convolved data
+    ret = mat_mult(reg_probe_density, wig_mat)
+    return(ret)
+  }))
+
+  wig_starts_split = unlist(lapply(preproc_matrices, function(l) {
+    l$wig_starts
+  }))
+
+
+  # from splited densities to full density
+  b_coords = (tss - off_set_beg):(tss + off_set_beg)
+  probe_density = rep(0, length(b_coords))
+  idx = unlist(sapply(preproc_matrices, function(i) {i$tmp_pos})) - min(b_coords) + 1
+  density_val = unlist(sapply(preproc_matrices, function(i) {i$reg_probe_density}))
+  density_val = density_val[idx>0 & idx<=length(probe_density)]
+  idx = idx[idx>0 & idx<=length(probe_density)]
+  probe_density[idx] = density_val
+
+
 
   # from sparse matrix to full matrix
   if (strand == "-") {
@@ -296,6 +393,15 @@ analyse_meth = function(gene, meth_data, meth_platform, cols, PLOT=TRUE, up_str=
   wig_sparse_idx = wig_data_sparse[,1][wig_data_sparse[,1] %in% wig_coords]
   wig_data_full[paste("pos_", wig_sparse_idx, sep=""),sample_names] = wig_data_sparse[paste("pos_", wig_sparse_idx, sep=""),sample_names]
 
+
+  # from wig_probe_density_split to wig_probe_density
+  names(wig_probe_density_split) = paste0("pos_", wig_starts_split)
+  wig_probe_density = rep(0, length(wig_coords))
+  names(wig_probe_density) = paste0("pos_", wig_coords)
+  wig_probe_density_split = wig_probe_density_split[names(wig_probe_density_split) %in% names(wig_probe_density)]
+  wig_probe_density[names(wig_probe_density_split)] = wig_probe_density_split
+
+
   # wig_data_full = NULL
 
   # plot
@@ -303,9 +409,9 @@ analyse_meth = function(gene, meth_data, meth_platform, cols, PLOT=TRUE, up_str=
     # display parameters
     y_base = -0.1
     # base
-    plot(0, 0, col=0, xlim=c(tss-up_str, tss+up_str), ylim=c(-0.5,1), 
+    plot(0, 0, col=0, xlim=c(tss-max(up_str, dwn_str), tss+max(up_str, dwn_str)), ylim=c(-0.5,1), 
                       ylab="beta", 
-                      xlab=paste("chr", unique(meth_platform[reg_probes_names, ]$CHR), sep=""), 
+                      xlab=paste("chr", unique(meth_platform[probe_idx, ]$CHR), sep=""), 
                       main=gene_name)
     # gene
     polygon(c(beg,end,end,beg), c(y_base-0.01, y_base-0.01, y_base+0.01, y_base+0.01), col=1)
@@ -320,7 +426,7 @@ analyse_meth = function(gene, meth_data, meth_platform, cols, PLOT=TRUE, up_str=
     }  
 
     # CpG Island
-    sub_meth_platform = meth_platform[reg_probes_names,]
+    sub_meth_platform = meth_platform[probe_idx,]
     cpg_islands = get_cpg_islands(sub_meth_platform)
     # print(paste("cpg_islands:", cpg_islands))
     pos_cpg_islands = cpg_islands$cen[chr == cpg_islands$chrom]
@@ -329,46 +435,59 @@ analyse_meth = function(gene, meth_data, meth_platform, cols, PLOT=TRUE, up_str=
       polygon(c(cpg_island[["beg"]],cpg_island[["end"]],cpg_island[["end"]],cpg_island[["beg"]]), c(y_base-0.41, y_base-0.41, y_base-0.39, y_base-0.39), col=2)
     })
     # CpG probes
-    points(meth_platform[reg_probes_names, "MAPINFO"], rep(y_base - 0.2, length(reg_probes_names)), pch=16, col=adjustcolor(4, alpha.f=0.3))
+    points(meth_platform[probe_idx, "MAPINFO"], rep(y_base - 0.2, length(probe_idx)), pch=16, col=adjustcolor(4, alpha.f=0.3))
+
     # raw probes signal
-    pos_x = meth_platform[reg_probes_names,]$MAPINFO
-    meth_data = meth_data[reg_probes_names, ]
-    if (length(reg_probes_names) == 1) {
+    pos_x = meth_platform[probe_idx,]$MAPINFO
+    meth_data = meth_data[probe_idx, ]
+    if (length(probe_idx) == 1) {
       meth_data = t(meth_data)
     }
     apply(meth_data, 2, function(c) {
       points(pos_x, c, col=adjustcolor("grey",0.3))     
     })
+
+    # density of probes
+    # lines(b_coords, (probe_density/max(probe_density)/2) - 0.5, type="l", col=4)
+    lines(wig_coords, (wig_probe_density/max(wig_probe_density)/2) - 0.5, type="l", col=2)
+    lines(wig_starts_split, (wig_probe_density_split/max(wig_probe_density_split)/2) - 0.5, type="l", col=2)
+
+
     # convolved signal
     matplot(wig_coords, wig_data_full, type="l", lty=1, col=adjustcolor(cols[sample_names], alpha.f=0.5), lwd=3, add=TRUE)
     legend("bottomright", legend=paste("(", table(cols), ")", sep=""), col=names(table(cols)), lty=1)
   }
     
   if (strand == "-") {
+    probe_density = rev(probe_density)
     wig_data_full = wig_data_full[nrow(wig_data_full):1, ]
   }
   
-  return(wig_data_full)
+  return(list(probe_idx=probe_idx, probe_density=probe_density, wig_probe_density=wig_probe_density, preproc_matrices=preproc_matrices, wig_data_full=wig_data_full))
 }
 
-get_cpg_islands = function(meth_platform) {
-  cpg_islands = sort(unique(as.character(meth_platform$UCSC_CpG_Islands_Name)))
-  cpg_island = cpg_islands[1]
-  foo = apply(t(cpg_islands), 2, function(cpg_island) {
-    # print(cpg_island)
-    s = strsplit(cpg_island, ":")[[1]]
-    chrom = substr(s[1],4,1000)
-    len = as.numeric(strsplit(s[2], "-")[[1]])
-    # print(s)
-    # print(len)
-    beg = len[1]
-    end = len[2]
-    return(list(cpg_island=cpg_island, chrom=chrom, beg=beg, end=end))
-  })
-  foo = do.call(rbind,foo)
-  cpg_islands = data.frame(lapply(data.frame(foo, stringsAsFactors=FALSE), unlist), stringsAsFactors=FALSE)
-  cpg_islands$cen = (cpg_islands$end + cpg_islands$beg) / 2 
-  cpg_islands$len =  cpg_islands$end - cpg_islands$beg 
+get_cpg_islands = function(meth_platform, cgi_colname="UCSC_CpG_Islands_Name") {
+  if (cgi_colname == "UCSC_CpG_Islands_Name") {
+    cpg_islands = sort(unique(as.character(meth_platform[[cgi_colname]])))
+    cpg_island = cpg_islands[1]
+    foo = apply(t(cpg_islands), 2, function(cpg_island) {
+      # print(cpg_island)
+      s = strsplit(cpg_island, ":")[[1]]
+      chrom = substr(s[1],4,1000)
+      len = as.numeric(strsplit(s[2], "-")[[1]])
+      # print(s)
+      # print(len)
+      beg = len[1]
+      end = len[2]
+      return(list(cpg_island=cpg_island, chrom=chrom, beg=beg, end=end))
+    })
+    foo = do.call(rbind,foo)
+    cpg_islands = data.frame(lapply(data.frame(foo, stringsAsFactors=FALSE), unlist), stringsAsFactors=FALSE)
+    cpg_islands$cen = (cpg_islands$end + cpg_islands$beg) / 2 
+    cpg_islands$len =  cpg_islands$end - cpg_islands$beg     
+  } else if (cgi_colname == "CGI_Coordinate"){
+    stop("get_cpg_islands. Not yet!")    
+  }
   return(cpg_islands)
 }
 
