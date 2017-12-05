@@ -3,6 +3,8 @@
 export(analyse_cnv)
 export(analyse_meth)
 export(analyse_trscr_cnv)
+export(plot_meth)
+importFrom(dmprocr,get_probe_names)
 importFrom(grDevices,adjustcolor)
 importFrom(graphics,arrows)
 importFrom(graphics,axis)

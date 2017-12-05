@@ -177,13 +177,17 @@ analyse_trscr_cnv = function(gene, trscr_res, cnv_res, meth_idx, ctrl_idx, cols,
   return(list(idx=idxes, cols=cols))
 }
 
+
+
+
+
+
 #' A Function Analyses Methylome data
 #'
 #' This function analyses methylome data.
 #' @param gene A vector describing the gene (line of a bed file).
 #' @param meth_data A matrix of beta values.
 #' @param meth_platform A data frame describing CpG positions.
-#' @param cols A color vectors indexed by by samples names.
 #' @param PLOT A boolean defining if graphical output must be dispayed on the graphical output.
 #' @param JUST_PROBE_POS A boolean defining if function returns only probes positions.
 #' @param GAUSSIAN_MIXTURE A boolean specifying if gaussian mixture model is use to convolve signal.
@@ -193,6 +197,9 @@ analyse_trscr_cnv = function(gene, trscr_res, cnv_res, meth_idx, ctrl_idx, cols,
 #' @param wig_size An integer specifying wiggle size (in bp).
 #' @param probe_idx A vector specifying probes associated to the gene.
 #' @param mat_mult A function to multiply matrices.
+#' @param mat_mult A function to multiply matrices.
+#' @param pf_pos_colname string matching the name of the column in the platform that contain the chromosome on which we find a probes.
+#' @param pf_pos_colname string matching the name of the column in the platform that contain the position information of probes.
 #' @return A matrix of convolved probes signal around the TSS of the selected gene.
 #' @importFrom grDevices adjustcolor
 #' @importFrom graphics arrows
@@ -200,6 +207,7 @@ analyse_trscr_cnv = function(gene, trscr_res, cnv_res, meth_idx, ctrl_idx, cols,
 #' @importFrom graphics plot
 #' @importFrom graphics points
 #' @importFrom graphics polygon
+#' @importFrom dmprocr get_probe_names
 #' @examples
 #' cols = as.numeric(sunexp_design$sex) * 2
 #' names(cols) = rownames(sunexp_design)
@@ -208,18 +216,32 @@ analyse_trscr_cnv = function(gene, trscr_res, cnv_res, meth_idx, ctrl_idx, cols,
 #' legend("topright", col=as.numeric(unique(sunexp_design$sex)) * 2, 
 #'        legend=unique(sunexp_design$sex), lty=1)
 #' @export
-analyse_meth = function(gene, meth_data, meth_platform, probe_idx, cols, PLOT=TRUE, up_str=5000, dwn_str=5000, win_size=1500, wig_size=50, JUST_PROBE_POS=FALSE, GAUSSIAN_MIXTURE=TRUE, mat_mult) {
-  if (missing(mat_mult)) {
-    mat_mult = function(A,B) {A %*% B}
+analyse_meth = function(
+  gene                                ,
+  meth_data                           , 
+  meth_platform                       , 
+  probe_idx                           , 
+  pf_chr_colname="Chromosome"         ,
+  pf_pos_colname="Start"              ,
+  PLOT=TRUE                           , 
+  up_str=5000                         , 
+  dwn_str=5000                        , 
+  win_size=1500                       ,
+  wig_size=50                         ,
+  JUST_PROBE_POS=FALSE                , 
+  GAUSSIAN_MIXTURE=TRUE               ,
+  mat_mult = function(A,B) {A %*% B} 
+ ) {
+
+  meth_platform = meth_platform[,c(pf_chr_colname,pf_pos_colname)]
+
+  if (substr(meth_platform[1, pf_chr_colname], 1, 3) != "chr") {
+    meth_platform[,pf_chr_colname] = paste0("chr",meth_platform[,pf_chr_colname])
   }
-  # print(gene)
-  sample_names = colnames(meth_data)
-  if (missing(cols)) {
-    cols=c()
-    cols[sample_names] = 1
-  } else {
-    cols = cols[sample_names]
+  if (substr(gene[[1]], 1, 3) != "chr") {
+    gene[[1]] = paste0("chr",gene[[1]])
   }
+
   # get gene properties
   chr =            gene[[1]]
   strand =         gene[[6]]
@@ -227,11 +249,6 @@ analyse_meth = function(gene, meth_data, meth_platform, probe_idx, cols, PLOT=TR
   beg = as.numeric(gene[[2]])
   end = as.numeric(gene[[3]])
   
-  # avoid chrXXX notation
-  if (substr(chr, 1, 3) == "chr") {
-    chr = substr(chr, 4, 100)
-  }
-
   # get meth infos
   if (strand == "-") {
   # if (TRUE) {
@@ -246,26 +263,29 @@ analyse_meth = function(gene, meth_data, meth_platform, probe_idx, cols, PLOT=TR
 
   ## Compute probes associated with the gene 
   if (missing(probe_idx)) {
-    probe_idx = rownames(meth_platform)[
-      !is.na(meth_platform$MAPINFO) & !is.na(meth_platform$CHR) &
-      meth_platform$CHR == chr &
-      meth_platform$MAPINFO >= tss-up_str &
-      meth_platform$MAPINFO < tss+dwn_str
-    ]    
+    probe_idx = get_probe_names(gene=gene, meth_platform=meth_platform, pf_chr_colname=pf_chr_colname, pf_pos_colname=pf_pos_colname, up_str=up_str, dwn_str=dwn_str)
   }
 
-  if (JUST_PROBE_POS) {
-    return(probe_idx)
-  }
-  gene_probe_pos = meth_platform[probe_idx, "MAPINFO"]
-  tss_shift = tss %% wig_size
-
-  if (length(gene_probe_pos) == 0) {
-    warning(paste0("No probe for ", gene[[4]], "."))
+  if (length(probe_idx) == 0) {
+    warning(paste0("No probes for gene ", gene[[4]],"(",gene[[5]],")."))
     return(NULL)
   }
 
-  # get independant regions form pos
+  if (JUST_PROBE_POS) {
+    return(list(probe_idx=probe_idx))
+  }
+
+  # print(gene[[4]])
+  sample_names = colnames(meth_data)
+
+
+  gene_probe_pos = meth_platform[probe_idx,pf_pos_colname]
+  tss_shift = tss %% wig_size
+
+  # NOW it's two step sparse computing of methylome signal: i) mask, ii) convolution.
+
+  # i) mask
+  # get independant regions form pos (mask definition)
   foo = gene_probe_pos[-1] - gene_probe_pos[-length(probe_idx)]
   ends_idx = which(foo > win_size)
   starts_idx = ends_idx + 1
@@ -275,11 +295,8 @@ analyse_meth = function(gene, meth_data, meth_platform, probe_idx, cols, PLOT=TR
   reg_infos = data.frame(starts_idx, ends_idx, beg=gene_probe_pos[starts_idx], end=gene_probe_pos[ends_idx])
   reg_infos$len =  reg_infos$end - reg_infos$beg
   reg_infos$nb_probes =  reg_infos$ends_idx - reg_infos$starts_idx + 1
-
-
-
-
-  # let's do it 1
+  # print(paste(nrow(reg_infos), "regions found."))
+  # Go!
   preproc_matrices = lapply(1:nrow(reg_infos), function(i) {
     tmp_reg = reg_infos[i,]
     tmp_starts_idx = tmp_reg$starts_idx
@@ -338,12 +355,25 @@ analyse_meth = function(gene, meth_data, meth_platform, probe_idx, cols, PLOT=TR
       }
       return(ret)
     })
-    ret = list(tmp_starts_idx=tmp_starts_idx, tmp_ends_idx=tmp_ends_idx, tmp_pos=tmp_pos, wig_starts=wig_starts, tmp_d=tmp_d, reg_probe_density=reg_probe_density, win_mat=win_mat, wig_mat=wig_mat)
-    return(ret)
+    l = list(
+      tmp_starts_idx=tmp_starts_idx, 
+      tmp_ends_idx=tmp_ends_idx, 
+      tmp_pos=tmp_pos, 
+      reg_probe_density=reg_probe_density, 
+
+      wig_starts=wig_starts, 
+      tmp_d=tmp_d, 
+      win_mat=win_mat, 
+      wig_mat=wig_mat
+    )
+    return(l)
   })
 
-  # let's do it 2
-  wig_data_sparse = lapply(preproc_matrices, function(l) {
+  # let's do it 2 (time comsuming)
+  wig_data_sparse = lapply(1:nrow(reg_infos), function(i) {
+    # print(i)
+    l = preproc_matrices[[i]]
+    preproc_matrices
     wig_starts = l$wig_starts
     tmp_d      = l$tmp_d
     win_mat    = l$win_mat
@@ -380,7 +410,6 @@ analyse_meth = function(gene, meth_data, meth_platform, probe_idx, cols, PLOT=TR
   probe_density[idx] = density_val
 
 
-
   # from sparse matrix to full matrix
   if (strand == "-") {
     wig_coords = ((tss - tss_shift - off_set_beg) / wig_size):((tss - tss_shift + off_set_beg)/wig_size) * 50 + tss_shift + 1
@@ -395,76 +424,158 @@ analyse_meth = function(gene, meth_data, meth_platform, probe_idx, cols, PLOT=TR
 
 
   # from wig_probe_density_split to wig_probe_density
-  names(wig_probe_density_split) = paste0("pos_", wig_starts_split)
+  names(wig_probe_density_split) = names(wig_starts_split) = paste0("pos_", wig_starts_split)
   wig_probe_density = rep(0, length(wig_coords))
   names(wig_probe_density) = paste0("pos_", wig_coords)
   wig_probe_density_split = wig_probe_density_split[names(wig_probe_density_split) %in% names(wig_probe_density)]
+  wig_starts_split = wig_starts_split[names(wig_starts_split) %in% names(wig_probe_density)]
   wig_probe_density[names(wig_probe_density_split)] = wig_probe_density_split
 
 
-  # wig_data_full = NULL
-
-  # plot
-  if (PLOT) { 
-    # display parameters
-    y_base = -0.1
-    # base
-    plot(0, 0, col=0, xlim=c(tss-max(up_str, dwn_str), tss+max(up_str, dwn_str)), ylim=c(-0.5,1), 
-                      ylab="beta", 
-                      xlab=paste("chr", unique(meth_platform[probe_idx, ]$CHR), sep=""), 
-                      main=gene_name)
-    # gene
-    polygon(c(beg,end,end,beg), c(y_base-0.01, y_base-0.01, y_base+0.01, y_base+0.01), col=1)
-    arr_len = (end-beg)/3
-    arr_len = 500
-    if (strand == "-") {
-      arrows(end, y_base, end, y_base+0.05, length=0)
-      arrows(end, y_base+0.05, end - arr_len, y_base+0.05, length=0.03)
-    } else {
-      arrows(beg, y_base, beg, y_base+0.05, length=0)
-      arrows(beg, y_base+0.05, beg + arr_len, y_base+0.05, length=0.03)
-    }  
-
-    # CpG Island
-    sub_meth_platform = meth_platform[probe_idx,]
-    cpg_islands = get_cpg_islands(sub_meth_platform)
-    # print(paste("cpg_islands:", cpg_islands))
-    pos_cpg_islands = cpg_islands$cen[chr == cpg_islands$chrom]
-    # points(pos_cpg_islands, rep(y_base -0.4, length(pos_cpg_islands)), pch=16, col=adjustcolor(2, alpha.f=0.3))
-    apply(cpg_islands, 1, function(cpg_island) {
-      polygon(c(cpg_island[["beg"]],cpg_island[["end"]],cpg_island[["end"]],cpg_island[["beg"]]), c(y_base-0.41, y_base-0.41, y_base-0.39, y_base-0.39), col=2)
-    })
-    # CpG probes
-    points(meth_platform[probe_idx, "MAPINFO"], rep(y_base - 0.2, length(probe_idx)), pch=16, col=adjustcolor(4, alpha.f=0.3))
-
-    # raw probes signal
-    pos_x = meth_platform[probe_idx,]$MAPINFO
-    meth_data = meth_data[probe_idx, ]
-    if (length(probe_idx) == 1) {
-      meth_data = t(meth_data)
-    }
-    apply(meth_data, 2, function(c) {
-      points(pos_x, c, col=adjustcolor("grey",0.3))     
-    })
-
-    # density of probes
-    # lines(b_coords, (probe_density/max(probe_density)/2) - 0.5, type="l", col=4)
-    lines(wig_coords, (wig_probe_density/max(wig_probe_density)/2) - 0.5, type="l", col=2)
-    lines(wig_starts_split, (wig_probe_density_split/max(wig_probe_density_split)/2) - 0.5, type="l", col=2)
-
-
-    # convolved signal
-    matplot(wig_coords, wig_data_full, type="l", lty=1, col=adjustcolor(cols[sample_names], alpha.f=0.5), lwd=3, add=TRUE)
-    legend("bottomright", legend=paste("(", table(cols), ")", sep=""), col=names(table(cols)), lty=1)
-  }
-    
   if (strand == "-") {
-    probe_density = rev(probe_density)
     wig_data_full = wig_data_full[nrow(wig_data_full):1, ]
+    wig_coords = rev(wig_coords)
+    wig_probe_density = rev(wig_probe_density)
   }
-  
-  return(list(probe_idx=probe_idx, probe_density=probe_density, wig_probe_density=wig_probe_density, preproc_matrices=preproc_matrices, wig_data_full=wig_data_full))
+
+  return(list(
+    gene            = gene                     , 
+    meth_data       = meth_data[probe_idx,]    , 
+    meth_platform   = meth_platform[probe_idx,], 
+    probe_idx       = probe_idx                , 
+    pf_chr_colname  = pf_chr_colname           , 
+    pf_pos_colname  = pf_pos_colname           , 
+    up_str          = up_str                   , 
+    dwn_str         = dwn_str                  , 
+    sample_names    = sample_names             ,
+    tss             = tss                      ,
+    wig_probe_density = wig_probe_density,
+    wig_starts_split = wig_starts_split,
+    wig_probe_density_split = wig_probe_density_split,
+    wig_coords =wig_coords,
+    wig_probe_density=wig_probe_density, 
+    # preproc_matrices=preproc_matrices,
+    wig_data_full=wig_data_full))
 }
+
+
+#' A Function that Plots Methylome Analysis Output
+#'
+#' This function plots methylome analysis output
+#' @param meth_analyse A list, corresponding to analyse_meth function output
+#' @param cols A color vectors indexed by by samples names.
+#' @param main A character string specifying the title of the plot.
+#' @param alpha.f=0.1 a numeric specifying transparency of convolved signal.
+#' @importFrom grDevices adjustcolor
+#' @importFrom graphics arrows
+#' @importFrom graphics matplot
+#' @importFrom graphics plot
+#' @importFrom graphics points
+#' @importFrom graphics polygon
+#' @export
+plot_meth = function(
+  meth_analyse,
+  cols         ,
+  main         ,
+  alpha.f=0.1                       
+ ) {
+
+  gene            = meth_analyse$gene
+  meth_data       = meth_analyse$meth_data      
+  meth_platform   = meth_analyse$meth_platform  
+  probe_idx       = meth_analyse$probe_idx      
+  pf_chr_colname  = meth_analyse$pf_chr_colname 
+  pf_pos_colname  = meth_analyse$pf_pos_colname 
+  up_str          = meth_analyse$up_str         
+  dwn_str         = meth_analyse$dwn_str         
+  sample_names    = meth_analyse$sample_names     
+  wig_starts_split = meth_analyse$wig_starts_split    
+  tss    = meth_analyse$tss  
+  wig_coords = meth_analyse$wig_coords
+  wig_probe_density = meth_analyse$wig_probe_density       
+  wig_probe_density_split = meth_analyse$wig_probe_density_split
+  wig_data_full = meth_analyse$wig_data_full
+
+  # check chr notation
+  if (substr(meth_platform[1, pf_chr_colname], 1, 3) != "chr") {
+   meth_platform[,pf_chr_colname] = paste0("chr",meth_platform[,pf_chr_colname])
+  }
+  if (substr(gene[[1]], 1, 3) != "chr") {
+   gene[[1]] = paste0("chr",gene[[1]])
+  }
+
+  # get gene properties
+  chr =            gene[[1]]
+  strand =         gene[[6]]
+  gene_name =      gene[[4]]
+  beg = as.numeric(gene[[2]])
+  end = as.numeric(gene[[3]])
+
+
+
+  if (missing(main)) {
+    main=""
+  } else {
+    main = paste0(main, " ")
+  }
+  if (missing(cols)) {
+    cols=c()
+    cols[sample_names] = 1
+  } else {
+    cols = cols[sample_names]
+  }
+
+  # display parameters
+  y_base = -0.1
+  # base
+  plot(0, 0, col=0, xlim=c(tss-max(up_str, dwn_str), tss+max(up_str, dwn_str)), ylim=c(-0.5,1), 
+                    ylab="beta", 
+                    xlab=unique(meth_platform[probe_idx, pf_chr_colname]), 
+                    main=paste0(main, gene_name))
+  # gene
+  polygon(c(beg,end,end,beg), c(y_base-0.01, y_base-0.01, y_base+0.01, y_base+0.01), col=1)
+  arr_len = (end-beg)/3
+  arr_len = 500
+  if (strand == "-") {
+    arrows(end, y_base, end, y_base+0.05, length=0)
+    arrows(end, y_base+0.05, end - arr_len, y_base+0.05, length=0.03)
+  } else {
+    arrows(beg, y_base, beg, y_base+0.05, length=0)
+    arrows(beg, y_base+0.05, beg + arr_len, y_base+0.05, length=0.03)
+  }  
+
+  # # CpG Island
+  # sub_meth_platform = meth_platform[probe_idx,]
+  # cpg_islands = methmybeachup:::get_cpg_islands(sub_meth_platform)
+  # # print(paste("cpg_islands:", cpg_islands))
+  # pos_cpg_islands = cpg_islands$cen[chr == cpg_islands$chrom]
+  # # points(pos_cpg_islands, rep(y_base -0.4, length(pos_cpg_islands)), pch=16, col=adjustcolor(2, alpha.f=0.3))
+  # apply(cpg_islands, 1, function(cpg_island) { polygon(c(cpg_island[["beg"]], cpg_island[["end"]], cpg_island[["end"]], cpg_island[["beg"]]), c(y_base-0.41, y_base-0.41, y_base-0.39, y_base-0.39), col=2)})
+  # # CpG probes
+  # points(meth_platform[probe_idx,pf_pos_colname], rep(y_base - 0.2, length(probe_idx)), pch=16, col=adjustcolor(4, alpha.f=0.3))
+
+  # raw probes signal
+  pos_x = meth_platform[probe_idx,pf_pos_colname]
+  meth_data = meth_data[probe_idx, ]
+  if (length(probe_idx) == 1) {
+    meth_data = t(meth_data)
+  }
+  apply(meth_data, 2, function(c) {
+    points(pos_x, c, col=adjustcolor("grey",0.3))     
+  })
+
+  # density of probes
+  # lines(b_coords, (probe_density/max(probe_density)/2) - 0.5, type="l", col=4)
+  lines(wig_coords, (wig_probe_density/max(wig_probe_density)/2) - 0.5, type="l", col=2)
+  # lines(wig_starts_split, (wig_probe_density_split/max(wig_probe_density_split)/2) - 0.5, type="l", col=2)
+
+
+  # convolved signal
+  matplot(wig_coords, wig_data_full, type="l", lty=1, col=adjustcolor(cols[sample_names], alpha.f=0.1), lwd=3, add=TRUE)
+  legend("bottomright", legend=paste("(", table(cols), ")", sep=""), col=names(table(cols)), lty=1)
+
+}
+
 
 get_cpg_islands = function(meth_platform, cgi_colname="UCSC_CpG_Islands_Name") {
   if (cgi_colname == "UCSC_CpG_Islands_Name") {

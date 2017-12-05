@@ -4,9 +4,11 @@
 \alias{analyse_meth}
 \title{A Function Analyses Methylome data}
 \usage{
-analyse_meth(gene, meth_data, meth_platform, cols, PLOT = TRUE,
+analyse_meth(gene, meth_data, meth_platform, probe_idx,
+  pf_chr_colname = "Chromosome", pf_pos_colname = "Start", PLOT = TRUE,
   up_str = 5000, dwn_str = 5000, win_size = 1500, wig_size = 50,
-  JUST_PROBE_POS = FALSE)
+  JUST_PROBE_POS = FALSE, GAUSSIAN_MIXTURE = TRUE, mat_mult = function(A,
+  B) {     A \%*\% B })
 }
 \arguments{
 \item{gene}{A vector describing the gene (line of a bed file).}
@@ -15,7 +17,9 @@ analyse_meth(gene, meth_data, meth_platform, cols, PLOT = TRUE,
 
 \item{meth_platform}{A data frame describing CpG positions.}
 
-\item{cols}{A color vectors indexed by by samples names.}
+\item{probe_idx}{A vector specifying probes associated to the gene.}
+
+\item{pf_pos_colname}{string matching the name of the column in the platform that contain the chromosome on which we find a probes.}
 
 \item{PLOT}{A boolean defining if graphical output must be dispayed on the graphical output.}
 
@@ -28,6 +32,14 @@ analyse_meth(gene, meth_data, meth_platform, cols, PLOT = TRUE,
 \item{wig_size}{An integer specifying wiggle size (in bp).}
 
 \item{JUST_PROBE_POS}{A boolean defining if function returns only probes positions.}
+
+\item{GAUSSIAN_MIXTURE}{A boolean specifying if gaussian mixture model is use to convolve signal.}
+
+\item{mat_mult}{A function to multiply matrices.}
+
+\item{mat_mult}{A function to multiply matrices.}
+
+\item{pf_pos_colname}{string matching the name of the column in the platform that contain the position information of probes.}
 }
 \value{
 A matrix of convolved probes signal around the TSS of the selected gene.
