@@ -13,7 +13,7 @@ plot_meth(meth_analyse, cols, main, alpha.f = 0.1)
 
 \item{main}{A character string specifying the title of the plot.}
 
-\item{alpha.f=0.1}{a numeric specifying transparency of convolved signal.}
+\item{alpha.f}{a numeric specifying transparency of convolved signal.}
 }
 \description{
 This function plots methylome analysis output

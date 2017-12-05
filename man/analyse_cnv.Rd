@@ -23,6 +23,8 @@ analyse_cnv(gene, cnv_data, cnv_platform, cols, PLOT = FALSE, up_str = 5000,
 \item{dwn_str}{An integer specifying down stream size (in bp).}
 
 \item{method}{A function used to extract CN score on each region}
+
+\item{FULL}{A boolean defining if full analysis must be performed.}
 }
 \description{
 This function analyses methylome data.

@@ -19,7 +19,9 @@ analyse_meth(gene, meth_data, meth_platform, probe_idx,
 
 \item{probe_idx}{A vector specifying probes associated to the gene.}
 
-\item{pf_pos_colname}{string matching the name of the column in the platform that contain the chromosome on which we find a probes.}
+\item{pf_chr_colname}{string matching the name of the column in the platform that contain the chromosome on which we find a probes.}
+
+\item{pf_pos_colname}{string matching the name of the column in the platform that contain the position information of probes.}
 
 \item{PLOT}{A boolean defining if graphical output must be dispayed on the graphical output.}
 
@@ -36,10 +38,6 @@ analyse_meth(gene, meth_data, meth_platform, probe_idx,
 \item{GAUSSIAN_MIXTURE}{A boolean specifying if gaussian mixture model is use to convolve signal.}
 
 \item{mat_mult}{A function to multiply matrices.}
-
-\item{mat_mult}{A function to multiply matrices.}
-
-\item{pf_pos_colname}{string matching the name of the column in the platform that contain the position information of probes.}
 }
 \value{
 A matrix of convolved probes signal around the TSS of the selected gene.
@@ -51,7 +49,8 @@ This function analyses methylome data.
 cols = as.numeric(sunexp_design$sex) * 2
 names(cols) = rownames(sunexp_design)
 gene = genes[1,]
-res1 = analyse_meth(gene, sunexp_data, sunexp_platform, cols, PLOT=TRUE)
+res1 = analyse_meth(gene, sunexp_data, sunexp_platform)
+plot_meth(res1, cols)
 legend("topright", col=as.numeric(unique(sunexp_design$sex)) * 2, 
        legend=unique(sunexp_design$sex), lty=1)
 }

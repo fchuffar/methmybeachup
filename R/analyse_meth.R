@@ -6,6 +6,7 @@
 #' @param cnv_platform A data frame describing probe positions.
 #' @param cols A color vectors indexed by by samples names.
 #' @param PLOT A boolean defining if graphical output must be dispayed on the graphical output.
+#' @param FULL A boolean defining if full analysis must be performed.
 #' @param up_str   An integer specifying up stream size (in bp).
 #' @param dwn_str  An integer specifying down stream size (in bp).
 #' @param method  A function used to extract CN score on each region
@@ -197,8 +198,7 @@ analyse_trscr_cnv = function(gene, trscr_res, cnv_res, meth_idx, ctrl_idx, cols,
 #' @param wig_size An integer specifying wiggle size (in bp).
 #' @param probe_idx A vector specifying probes associated to the gene.
 #' @param mat_mult A function to multiply matrices.
-#' @param mat_mult A function to multiply matrices.
-#' @param pf_pos_colname string matching the name of the column in the platform that contain the chromosome on which we find a probes.
+#' @param pf_chr_colname string matching the name of the column in the platform that contain the chromosome on which we find a probes.
 #' @param pf_pos_colname string matching the name of the column in the platform that contain the position information of probes.
 #' @return A matrix of convolved probes signal around the TSS of the selected gene.
 #' @importFrom grDevices adjustcolor
@@ -207,12 +207,14 @@ analyse_trscr_cnv = function(gene, trscr_res, cnv_res, meth_idx, ctrl_idx, cols,
 #' @importFrom graphics plot
 #' @importFrom graphics points
 #' @importFrom graphics polygon
+#' @importFrom stats dnorm
 #' @importFrom dmprocr get_probe_names
 #' @examples
 #' cols = as.numeric(sunexp_design$sex) * 2
 #' names(cols) = rownames(sunexp_design)
 #' gene = genes[1,]
-#' res1 = analyse_meth(gene, sunexp_data, sunexp_platform, cols, PLOT=TRUE)
+#' res1 = analyse_meth(gene, sunexp_data, sunexp_platform)
+#' plot_meth(res1, cols)
 #' legend("topright", col=as.numeric(unique(sunexp_design$sex)) * 2, 
 #'        legend=unique(sunexp_design$sex), lty=1)
 #' @export
@@ -465,13 +467,14 @@ analyse_meth = function(
 #' @param meth_analyse A list, corresponding to analyse_meth function output
 #' @param cols A color vectors indexed by by samples names.
 #' @param main A character string specifying the title of the plot.
-#' @param alpha.f=0.1 a numeric specifying transparency of convolved signal.
+#' @param alpha.f a numeric specifying transparency of convolved signal.
 #' @importFrom grDevices adjustcolor
 #' @importFrom graphics arrows
 #' @importFrom graphics matplot
 #' @importFrom graphics plot
 #' @importFrom graphics points
 #' @importFrom graphics polygon
+#' @importFrom graphics lines
 #' @export
 plot_meth = function(
   meth_analyse,
